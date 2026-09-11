@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evaluador de plan de escalado</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#0A0C10;
+    --panel:#101319;
+    --panel-2:#161A22;
+    --line:rgba(255,255,255,0.08);
+    --line-strong:rgba(255,255,255,0.16);
+    --text:#EDEFF3;
+    --text-2:#8A91A0;
+    --text-3:#565D6C;
+    --accent:#7C5CFF;
+    --accent-2:#35D8D0;
+    --good:#35D399;
+    --bad:#FF5C7A;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:'Inter', sans-serif;
+    -webkit-font-smoothing:antialiased;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size:40px 40px;
+  }
+  .scanline{
+    position:fixed; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent);
+    animation:scan 3.2s ease-in-out infinite;
+    opacity:0.7;
+  }
+  @keyframes scan{
+    0%{ transform:translateY(0); opacity:0; }
+    5%{ opacity:0.7; }
+    50%{ opacity:0.35; }
+    95%{ opacity:0.7; }
+    100%{ transform:translateY(100vh); opacity:0; }
+  }
+  @media (prefers-reduced-motion:reduce){ .scanline{animation:none; display:none;} }
+
+  .wrap{
+    max-width:640px;
+    margin:0 auto;
+    padding:64px 24px 90px;
+    position:relative;
+  }
+  .kicker{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px;
+    color:var(--accent-2);
+    margin:0 0 14px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .kicker .dot{
+    width:6px; height:6px; background:var(--accent-2); border-radius:50%;
+    box-shadow:0 0 8px var(--accent-2);
+  }
+  h1{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:600;
+    font-size:32px;
+    line-height:1.15;
+    margin:0 0 12px;
+    letter-spacing:-0.01em;
+  }
+  .subtitle{
+    color:var(--text-2);
+    font-size:15px;
+    line-height:1.6;
+    max-width:48ch;
+    margin:0 0 40px;
+  }
+
+  .drop{
+    position:relative;
+    border:1px solid var(--line);
+    padding:48px 24px;
+    text-align:center;
+    cursor:pointer;
+    background:var(--panel);
+    transition:border-color 0.15s ease, background 0.15s ease;
+  }
+  .drop::before, .drop::after,
+  .corner-tl, .corner-br{
+    content:'';
+    position:absolute;
+    width:16px; height:16px;
+    border-color:var(--text-3);
+    transition:border-color 0.15s ease;
+  }
+  .drop::before{ top:-1px; left:-1px; border-top:1.5px solid; border-left:1.5px solid; }
+  .drop::after{ bottom:-1px; right:-1px; border-bottom:1.5px solid; border-right:1.5px solid; }
+  .drop.hover{ background:var(--panel-2); }
+  .drop.hover::before, .drop.hover::after{ border-color:var(--accent); }
+
+  .drop-glyph{
+    width:36px; height:36px;
+    margin:0 auto 18px;
+    border:1px solid var(--text-3);
+    display:flex; align-items:center; justify-content:center;
+    color:var(--accent-2);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:16px;
+  }
+  .drop-title{
+    font-family:'Space Grotesk', sans-serif;
+    font-size:16px;
+    font-weight:500;
+    margin:0 0 6px;
+  }
+  .drop-sub{
+    font-size:13px;
+    color:var(--text-2);
+  }
+  .drop-sub button{
+    background:none; border:none; padding:0;
+    font:inherit; color:var(--accent-2);
+    cursor:pointer;
+    border-bottom:1px solid rgba(53,216,208,0.35);
+  }
+  input[type=file]{display:none;}
+
+  .filebar{
+    display:none;
+    align-items:center; justify-content:space-between;
+    margin-top:12px; padding:12px 16px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    font-size:13px;
+  }
+  .filebar .name{ font-family:'IBM Plex Mono', monospace; color:var(--text); }
+  .filebar button{
+    background:none; border:none; color:var(--text-2); cursor:pointer; font-size:13px;
+  }
+  .filebar button:hover{ color:var(--bad); }
+
+  #error{
+    display:none; margin-top:16px; padding:14px 16px;
+    background:rgba(255,92,122,0.08);
+    border-left:2px solid var(--bad);
+    color:#FF9FB2;
+    font-size:13px; line-height:1.6;
+    font-family:'IBM Plex Mono', monospace;
+  }
+
+  #results{ display:none; margin-top:48px; }
+
+  .verdict{
+    padding:32px 0;
+    border-top:1px solid var(--line);
+    border-bottom:1px solid var(--line);
+    margin-bottom:36px;
+    text-align:center;
+  }
+  .verdict-word{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700;
+    font-size:34px;
+    letter-spacing:-0.01em;
+  }
+  .verdict-word.ok{ color:var(--good); text-shadow:0 0 24px rgba(53,211,153,0.35); }
+  .verdict-word.no{ color:var(--bad); text-shadow:0 0 24px rgba(255,92,122,0.3); }
+  .verdict-sub{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px; color:var(--text-2);
+    margin-top:8px;
+  }
+
+  .req{
+    display:flex; gap:16px;
+    padding:18px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .req:last-child{ border-bottom:none; }
+  .req-mark{
+    flex:none; width:22px; height:22px;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px; font-weight:600;
+    border:1px solid;
+    margin-top:2px;
+  }
+  .req-mark.ok{ color:var(--good); border-color:rgba(53,211,153,0.4); }
+  .req-mark.no{ color:var(--bad); border-color:rgba(255,92,122,0.4); }
+  .req-title{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:500; font-size:15px; margin-bottom:3px;
+  }
+  .req-detail{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12.5px; color:var(--text-2);
+  }
+
+  .section-label{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    letter-spacing:0.06em;
+    color:var(--text-3);
+    margin:40px 0 14px;
+  }
+
+  table{
+    width:100%; border-collapse:collapse;
+    font-size:13px; font-family:'IBM Plex Mono', monospace;
+  }
+  th{
+    text-align:left; font-weight:500;
+    color:var(--text-3);
+    font-size:11px;
+    padding:8px 4px;
+    border-bottom:1px solid var(--line-strong);
+  }
+  td{ padding:9px 4px; border-bottom:1px solid var(--line); color:var(--text); }
+  td.num, th.num{ text-align:right; }
+  .pos{ color:var(--good); }
+  .neg{ color:var(--bad); }
+  .muted{ color:var(--text-2); }
+
+  .foot-note{
+    margin-top:40px;
+    font-size:12px; color:var(--text-3);
+    line-height:1.7;
+    border-top:1px solid var(--line);
+    padding-top:18px;
+  }
+</style>
+</head>
+<body>
+<div class="scanline"></div>
+<div class="wrap">
+  <p class="kicker"><span class="dot"></span>evaluador local — nada sale de tu navegador</p>
+  <h1>Plan de escalado</h1>
+  <p class="subtitle">Soltá el ReportHistory (.xlsx) exportado desde MT4/MT5 y revisá al instante si el ciclo cumple los tres requisitos.</p>
+
+  <div class="drop" id="drop">
+    <div class="drop-glyph">↓</div>
+    <p class="drop-title">Arrastrá el archivo acá</p>
+    <p class="drop-sub">o <button type="button" id="browseBtn">elegilo desde tu equipo</button></p>
+    <input type="file" id="fileInput" accept=".xlsx">
+  </div>
+
+  <div class="filebar" id="filebar">
+    <span class="name" id="filename"></span>
+    <button id="clearBtn">quitar</button>
+  </div>
+
+  <div id="error"></div>
+  <div id="results"></div>
+</div>
+
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('fileInput');
+const browseBtn = document.getElementById('browseBtn');
+const filebar = document.getElementById('filebar');
+const filenameEl = document.getElementById('filename');
+const clearBtn = document.getElementById('clearBtn');
+const errorEl = document.getElementById('error');
+const resultsEl = document.getElementById('results');
+
+const MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+drop.addEventListener('click', () => fileInput.click());
+browseBtn.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+
+['dragenter','dragover'].forEach(evt => {
+  drop.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.add('hover'); });
+});
+['dragleave','drop'].forEach(evt => {
+  drop.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('hover'); });
+});
+drop.addEventListener('drop', (e) => {
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+fileInput.addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (f) handleFile(f);
+});
+clearBtn.addEventListener('click', () => {
+  fileInput.value = '';
+  filebar.style.display = 'none';
+  resultsEl.style.display = 'none';
+  errorEl.style.display = 'none';
+});
+
+function mostrarError(msg){
+  errorEl.textContent = msg;
+  errorEl.style.display = 'block';
+  resultsEl.style.display = 'none';
+}
+
+function handleFile(file){
+  errorEl.style.display = 'none';
+  filenameEl.textContent = file.name;
+  filebar.style.display = 'flex';
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, blankrows: true });
+      const res = evaluarEscalado(rows);
+      renderResultados(res);
+    } catch (err) {
+      console.error(err);
+      mostrarError('no se pudo leer el archivo — verificá que sea un ReportHistory (.xlsx) exportado desde MT4/MT5, con las secciones Positions, Orders y Deals. detalle: ' + err.message);
+    }
+  };
+  reader.onerror = () => mostrarError('no se pudo leer el archivo desde el navegador.');
+  reader.readAsArrayBuffer(file);
+}
+
+function parseFecha(valor){
+  if (valor instanceof Date) return valor;
+  if (typeof valor === 'string') {
+    const m = valor.trim().match(/^(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
+    if (m) {
+      const [, y, mo, d, h, mi, s] = m.map(Number);
+      return new Date(y, mo - 1, d, h, mi, s);
+    }
+  }
+  return null;
+}
+
+function addMonthsClamped(date, months){
+  const day = date.getDate();
+  const target = new Date(date.getFullYear(), date.getMonth() + months, 1, date.getHours(), date.getMinutes(), date.getSeconds());
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, lastDay));
+  return target;
+}
+
+function evaluarEscalado(rows){
+  const idxDeals = rows.findIndex(r => r && r[0] === 'Deals');
+  if (idxDeals === -1) {
+    throw new Error("no se encontró la sección 'Deals' en el archivo");
+  }
+  const headers = rows[idxDeals + 1].map(h => (h || '').toString().trim());
+  const col = (name) => headers.indexOf(name);
+  const cTime = col('Time'), cType = col('Type'), cComment = col('Comment'), cProfit = col('Profit'), cBalance = col('Balance');
+
+  const deals = [];
+  for (let i = idxDeals + 2; i < rows.length; i++){
+    const row = rows[i];
+    if (!row) break;
+    const fecha = parseFecha(row[cTime]);
+    if (!fecha) break;
+    deals.push({
+      time: fecha,
+      type: (row[cType] || '').toString().toLowerCase(),
+      comment: (row[cComment] || '').toString().toLowerCase(),
+      profit: Number(row[cProfit]) || 0,
+      balance: Number(row[cBalance])
+    });
+  }
+  if (deals.length === 0) throw new Error('no se encontraron operaciones (Deals) en el archivo');
+
+  const creacion = deals.find(d => d.type === 'balance' && d.comment.includes('create'));
+  const inicio = creacion ? creacion.time : deals[0].time;
+  const balanceInicial = creacion ? creacion.balance : (deals[0].balance - deals[0].profit);
+  const finCiclo = addMonthsClamped(inicio, 3);
+
+  const retiros = deals.filter(d => d.type === 'balance' && d.comment.includes('withdrawal'));
+  const retirosCiclo = retiros.filter(d => d.time >= inicio && d.time < finCiclo);
+
+  const trades = deals.filter(d => d.type !== 'balance');
+  const tradesCiclo = trades.filter(d => d.time >= inicio && d.time < finCiclo);
+
+  const porMes = {};
+  tradesCiclo.forEach(d => {
+    const key = d.time.getFullYear() + '-' + String(d.time.getMonth() + 1).padStart(2, '0');
+    porMes[key] = (porMes[key] || 0) + d.profit;
+  });
+  const mesesOrdenados = Object.keys(porMes).sort();
+  const mesesPositivos = mesesOrdenados.filter(k => porMes[k] > 0).length;
+  const cumpleMeses = mesesPositivos >= 2;
+
+  const profitTotal = tradesCiclo.reduce((acc, d) => acc + d.profit, 0);
+  const retornoPct = balanceInicial ? (profitTotal / balanceInicial) * 100 : 0;
+  const cumpleRetorno = retornoPct >= 15;
+
+  const cumpleRetiros = retirosCiclo.length >= 3;
+
+  return {
+    balanceInicial, inicio, finCiclo,
+    mesesOrdenados, porMes, mesesPositivos, cumpleMeses,
+    profitTotal, retornoPct, cumpleRetorno,
+    retirosCiclo, cumpleRetiros,
+    calificado: cumpleRetorno && cumpleMeses && cumpleRetiros
+  };
+}
+
+function fmtMoney(n){
+  return n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtFecha(d){
+  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+function mesLabel(key){
+  const [y, m] = key.split('-');
+  return MESES_ES[parseInt(m, 10) - 1] + ' ' + y;
+}
+
+function renderResultados(res){
+  const filas = res.mesesOrdenados.map(k => {
+    const val = res.porMes[k];
+    const cls = val > 0 ? 'pos' : 'neg';
+    return `<tr><td>${mesLabel(k)}</td><td class="num ${cls}">${fmtMoney(val)}</td><td class="num ${cls}">${val > 0 ? 'positivo' : 'negativo'}</td></tr>`;
+  }).join('');
+
+  const filasRetiros = res.retirosCiclo.map(d =>
+    `<tr><td>${fmtFecha(d.time)}</td><td class="num neg">${fmtMoney(d.profit)}</td><td class="muted">${d.comment}</td></tr>`
+  ).join('') || `<tr><td colspan="3" class="muted">sin retiros en el ciclo</td></tr>`;
+
+  resultsEl.innerHTML = `
+    <div class="verdict">
+      <div class="verdict-word ${res.calificado ? 'ok' : 'no'}">${res.calificado ? 'califica' : 'no califica'}</div>
+      <div class="verdict-sub">ciclo ${fmtFecha(res.inicio)} → ${fmtFecha(res.finCiclo)}</div>
+    </div>
+
+    <div class="req">
+      <div class="req-mark ${res.cumpleRetorno ? 'ok' : 'no'}">${res.cumpleRetorno ? 'OK' : 'X'}</div>
+      <div class="req-body">
+        <div class="req-title">retorno del 15% en el ciclo</div>
+        <div class="req-detail">${fmtMoney(res.profitTotal)} / ${fmtMoney(res.balanceInicial)} = ${res.retornoPct.toFixed(2)}%</div>
+      </div>
+    </div>
+    <div class="req">
+      <div class="req-mark ${res.cumpleMeses ? 'ok' : 'no'}">${res.cumpleMeses ? 'OK' : 'X'}</div>
+      <div class="req-body">
+        <div class="req-title">al menos 2 de 3 meses en positivo</div>
+        <div class="req-detail">${res.mesesPositivos} de ${res.mesesOrdenados.length} meses positivos</div>
+      </div>
+    </div>
+    <div class="req">
+      <div class="req-mark ${res.cumpleRetiros ? 'ok' : 'no'}">${res.cumpleRetiros ? 'OK' : 'X'}</div>
+      <div class="req-body">
+        <div class="req-title">al menos 3 solicitudes de recompensa</div>
+        <div class="req-detail">${res.retirosCiclo.length} retiro(s) detectado(s)</div>
+      </div>
+    </div>
+
+    <div class="section-label">resultado mensual</div>
+    <table>
+      <tr><th>mes</th><th class="num">resultado</th><th class="num">estado</th></tr>
+      ${filas}
+    </table>
+
+    <div class="section-label">retiros del ciclo</div>
+    <table>
+      <tr><th>fecha</th><th class="num">monto</th><th>comentario</th></tr>
+      ${filasRetiros}
+    </table>
+
+    <p class="foot-note">cálculo agrupado por mes calendario sobre la sección "Deals" del reporte. el retorno usa el profit total de trading del ciclo, sin descontar retiros ya realizados.</p>
+  `;
+  resultsEl.style.display = 'block';
+}
+</script>
+</body>
+</html>
