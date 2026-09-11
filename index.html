@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="favicon.png"/>
 <title>Evaluador de plan de escalado</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -24,6 +25,8 @@
     --good-soft:rgba(74,222,149,0.12);
     --bad:#FF6B6B;
     --bad-soft:rgba(255,107,107,0.12);
+    --warn:#F5B85A;
+    --warn-soft:rgba(245,184,90,0.12);
   }
   *{box-sizing:border-box;}
   :root{ --ease:cubic-bezier(0.16,1,0.3,1); }
@@ -161,6 +164,7 @@
   }
   .verdict.ok{ background:var(--good-soft); border-color:rgba(74,222,149,0.25); }
   .verdict.no{ background:var(--bad-soft); border-color:rgba(255,107,107,0.25); }
+  .verdict.pending{ background:var(--warn-soft); border-color:rgba(245,184,90,0.3); }
   .verdict-badge{
     flex:none;
     width:40px; height:40px;
@@ -170,12 +174,14 @@
   }
   .verdict-badge.ok{ background:var(--good); color:#0B1F14; }
   .verdict-badge.no{ background:var(--bad); color:#2A0A0A; }
+  .verdict-badge.pending{ background:var(--warn); color:#2A1D05; font-size:14px; font-weight:700; }
   .verdict-word{
     font-weight:700;
     font-size:19px;
   }
   .verdict-word.ok{ color:var(--good); }
   .verdict-word.no{ color:var(--bad); }
+  .verdict-word.pending{ color:var(--warn); }
   .verdict-sub{
     font-size:13px; color:var(--text-2);
     margin-top:2px;
@@ -236,6 +242,46 @@
   .pos{ color:var(--good); font-weight:500; }
   .neg{ color:var(--bad); font-weight:500; }
   .muted{ color:var(--text-3); }
+  .warn-text{ color:var(--warn); font-weight:500; }
+
+  details.mes-detail summary{
+    cursor:pointer;
+    list-style:none;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  details.mes-detail summary::-webkit-details-marker{ display:none; }
+  details.mes-detail summary .chev{
+    color:var(--text-3);
+    font-size:11px;
+    transition:transform 0.2s var(--ease);
+    flex:none;
+  }
+  details.mes-detail[open] summary .chev{ transform:rotate(90deg); }
+  .sub-table{
+    padding:2px 0 10px 20px;
+    font-size:12.5px;
+  }
+  .sub-table .sub-row{
+    display:flex; justify-content:space-between;
+    padding:5px 0;
+    color:var(--text-2);
+    border-bottom:1px solid var(--border);
+  }
+  .sub-table .sub-row:last-child{ border-bottom:none; }
+
+  .integrity{
+    display:flex; align-items:center; gap:8px;
+    font-size:12.5px;
+    color:var(--text-2);
+    margin-bottom:20px;
+  }
+  .integrity .chip{
+    width:7px; height:7px; border-radius:50%;
+  }
+  .integrity .chip.ok{ background:var(--good); }
+  .integrity .chip.warn{ background:var(--warn); }
 
   .foot-note{
     margin-top:32px;
@@ -355,6 +401,27 @@ function addMonthsClamped(date, months){
   return target;
 }
 
+function mesesDelCiclo(inicio, n){
+  const meses = [];
+  for (let i = 0; i < n; i++){
+    const d = new Date(inicio.getFullYear(), inicio.getMonth() + i, 1);
+    meses.push({ year: d.getFullYear(), month: d.getMonth() + 1, key: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') });
+  }
+  return meses;
+}
+
+function buscarTotalTradesFooter(rows, desde){
+  for (let i = desde; i < rows.length; i++){
+    const row = rows[i];
+    if (!row) continue;
+    if (row[0] === 'Total Trades:'){
+      const num = row.find((v, idx) => idx > 0 && typeof v === 'number');
+      return typeof num === 'number' ? num : null;
+    }
+  }
+  return null;
+}
+
 function evaluarEscalado(rows){
   const idxDeals = rows.findIndex(r => r && r[0] === 'Deals');
   if (idxDeals === -1) {
@@ -362,21 +429,25 @@ function evaluarEscalado(rows){
   }
   const headers = rows[idxDeals + 1].map(h => (h || '').toString().trim());
   const col = (name) => headers.indexOf(name);
-  const cTime = col('Time'), cType = col('Type'), cComment = col('Comment'), cProfit = col('Profit'), cBalance = col('Balance');
+  const cTime = col('Time'), cType = col('Type'), cComment = col('Comment'), cProfit = col('Profit'), cBalance = col('Balance'), cSymbol = col('Symbol'), cDirection = col('Direction');
 
   const deals = [];
+  let finDeals = idxDeals + 2;
   for (let i = idxDeals + 2; i < rows.length; i++){
     const row = rows[i];
-    if (!row) break;
+    if (!row) { finDeals = i; break; }
     const fecha = parseFecha(row[cTime]);
-    if (!fecha) break;
+    if (!fecha) { finDeals = i; break; }
     deals.push({
       time: fecha,
       type: (row[cType] || '').toString().toLowerCase(),
+      direction: (row[cDirection] || '').toString().toLowerCase(),
+      symbol: (row[cSymbol] || '').toString(),
       comment: (row[cComment] || '').toString().toLowerCase(),
-      profit: Number(row[cProfit]) || 0,
+      profit: Math.round((Number(row[cProfit]) || 0) * 100) / 100,
       balance: Number(row[cBalance])
     });
+    finDeals = i + 1;
   }
   if (deals.length === 0) throw new Error('no se encontraron operaciones (Deals) en el archivo');
 
@@ -384,6 +455,8 @@ function evaluarEscalado(rows){
   const inicio = creacion ? creacion.time : deals[0].time;
   const balanceInicial = creacion ? creacion.balance : (deals[0].balance - deals[0].profit);
   const finCiclo = addMonthsClamped(inicio, 3);
+  const hoy = new Date();
+  const cicloFinalizado = hoy >= finCiclo;
 
   const retiros = deals.filter(d => d.type === 'balance' && d.comment.includes('withdrawal'));
   const retirosCiclo = retiros.filter(d => d.time >= inicio && d.time < finCiclo);
@@ -391,27 +464,41 @@ function evaluarEscalado(rows){
   const trades = deals.filter(d => d.type !== 'balance');
   const tradesCiclo = trades.filter(d => d.time >= inicio && d.time < finCiclo);
 
-  const porMes = {};
-  tradesCiclo.forEach(d => {
-    const key = d.time.getFullYear() + '-' + String(d.time.getMonth() + 1).padStart(2, '0');
-    porMes[key] = (porMes[key] || 0) + d.profit;
+  // --- control de integridad: cotejar cierres detectados contra el resumen del broker ---
+  const cierresDetectados = trades.filter(d => d.direction === 'out').length;
+  const totalTradesFooter = buscarTotalTradesFooter(rows, finDeals);
+  const integridadOk = totalTradesFooter === null || totalTradesFooter === cierresDetectados;
+
+  // --- meses del ciclo: siempre los 3, aunque alguno no tenga operaciones ---
+  const claveHoy = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0');
+  const meses = mesesDelCiclo(inicio, 3).map(m => {
+    const tradesMes = tradesCiclo.filter(d => (d.time.getFullYear() + '-' + String(d.time.getMonth() + 1).padStart(2, '0')) === m.key);
+    const resultado = Math.round(tradesMes.reduce((acc, d) => acc + d.profit, 0) * 100) / 100;
+    let estado;
+    if (m.key === claveHoy && !cicloFinalizado) estado = 'en_curso';
+    else if (tradesMes.length === 0) estado = 'sin_operaciones';
+    else if (resultado > 0) estado = 'positivo';
+    else estado = 'negativo';
+    return { ...m, resultado, estado, trades: tradesMes };
   });
-  const mesesOrdenados = Object.keys(porMes).sort();
-  const mesesPositivos = mesesOrdenados.filter(k => porMes[k] > 0).length;
+
+  const mesesPositivos = meses.filter(m => m.estado === 'positivo').length;
   const cumpleMeses = mesesPositivos >= 2;
 
-  const profitTotal = tradesCiclo.reduce((acc, d) => acc + d.profit, 0);
+  const profitTotal = Math.round(tradesCiclo.reduce((acc, d) => acc + d.profit, 0) * 100) / 100;
   const retornoPct = balanceInicial ? (profitTotal / balanceInicial) * 100 : 0;
   const cumpleRetorno = retornoPct >= 15;
 
   const cumpleRetiros = retirosCiclo.length >= 3;
+  const calificado = cumpleRetorno && cumpleMeses && cumpleRetiros;
 
   return {
-    balanceInicial, inicio, finCiclo,
-    mesesOrdenados, porMes, mesesPositivos, cumpleMeses,
+    balanceInicial, inicio, finCiclo, cicloFinalizado,
+    meses, mesesPositivos, cumpleMeses,
     profitTotal, retornoPct, cumpleRetorno,
     retirosCiclo, cumpleRetiros,
-    calificado: cumpleRetorno && cumpleMeses && cumpleRetiros
+    calificado,
+    integridadOk, cierresDetectados, totalTradesFooter
   };
 }
 
@@ -434,22 +521,55 @@ function svgCross(){
 }
 
 function renderResultados(res){
-  const filas = res.mesesOrdenados.map(k => {
-    const val = res.porMes[k];
-    const cls = val > 0 ? 'pos' : 'neg';
-    return `<tr><td>${mesLabel(k)}</td><td class="num ${cls}">${fmtMoney(val)}</td><td class="num ${cls}">${val > 0 ? 'positivo' : 'negativo'}</td></tr>`;
+  const ESTADO_LABEL = { positivo: 'positivo', negativo: 'negativo', sin_operaciones: 'sin operaciones', en_curso: 'en curso' };
+  const ESTADO_CLASE = { positivo: 'pos', negativo: 'neg', sin_operaciones: 'muted', en_curso: 'warn-text' };
+
+  const filas = res.meses.map(m => {
+    const cls = ESTADO_CLASE[m.estado];
+    const filasTrades = m.trades.map(d =>
+      `<div class="sub-row"><span>${fmtFecha(d.time)} · ${d.symbol || d.type}</span><span class="${d.profit > 0 ? 'pos' : (d.profit < 0 ? 'neg' : 'muted')}">${fmtMoney(d.profit)}</span></div>`
+    ).join('') || `<div class="sub-row muted">sin operaciones cerradas este mes</div>`;
+
+    return `<tr>
+      <td colspan="3" style="padding:0;">
+        <details class="mes-detail">
+          <summary style="padding:9px 0;">
+            <span class="chev">▸</span>
+            <span style="flex:1;">${mesLabel(m.key)}</span>
+            <span class="num ${cls}" style="width:110px;">${fmtMoney(m.resultado)}</span>
+            <span class="num ${cls}" style="width:110px;">${ESTADO_LABEL[m.estado]}</span>
+          </summary>
+          <div class="sub-table">${filasTrades}</div>
+        </details>
+      </td>
+    </tr>`;
   }).join('');
 
   const filasRetiros = res.retirosCiclo.map(d =>
     `<tr><td>${fmtFecha(d.time)}</td><td class="num neg">${fmtMoney(d.profit)}</td><td class="muted">${d.comment}</td></tr>`
   ).join('') || `<tr><td colspan="3" class="muted">Sin retiros en el ciclo</td></tr>`;
 
+  const veredictoClase = !res.cicloFinalizado ? 'pending' : (res.calificado ? 'ok' : 'no');
+  const veredictoTexto = !res.cicloFinalizado ? 'En curso' : (res.calificado ? 'Califica' : 'No califica');
+  const veredictoIcono = !res.cicloFinalizado ? '···' : (res.calificado ? svgCheck() : svgCross());
+  const veredictoSub = !res.cicloFinalizado
+    ? `Ciclo aún no finaliza (${fmtFecha(res.finCiclo)}) — resultado parcial con los datos disponibles`
+    : `Ciclo ${fmtFecha(res.inicio)} — ${fmtFecha(res.finCiclo)}`;
+
+  const integridadHtml = res.totalTradesFooter === null
+    ? ''
+    : `<div class="integrity"><span class="chip ${res.integridadOk ? 'ok' : 'warn'}"></span>${res.integridadOk
+        ? `Datos verificados: ${res.cierresDetectados}/${res.totalTradesFooter} operaciones coinciden con el resumen del broker`
+        : `Atención: se detectaron ${res.cierresDetectados} cierres, pero el resumen del broker indica ${res.totalTradesFooter} — revisá el archivo`}</div>`;
+
   resultsEl.innerHTML = `
-    <div class="verdict anim ${res.calificado ? 'ok' : 'no'}" style="animation-delay:0.05s">
-      <div class="verdict-badge ${res.calificado ? 'ok' : 'no'}">${res.calificado ? svgCheck() : svgCross()}</div>
+    ${integridadHtml}
+
+    <div class="verdict anim ${veredictoClase}" style="animation-delay:0.05s">
+      <div class="verdict-badge ${veredictoClase}">${veredictoIcono}</div>
       <div>
-        <div class="verdict-word ${res.calificado ? 'ok' : 'no'}">${res.calificado ? 'Califica' : 'No califica'}</div>
-        <div class="verdict-sub">Ciclo ${fmtFecha(res.inicio)} — ${fmtFecha(res.finCiclo)}</div>
+        <div class="verdict-word ${veredictoClase}">${veredictoTexto}</div>
+        <div class="verdict-sub">${veredictoSub}</div>
       </div>
     </div>
 
@@ -465,7 +585,7 @@ function renderResultados(res){
         <div class="req-mark ${res.cumpleMeses ? 'ok' : 'no'}" style="animation-delay:0.48s">${res.cumpleMeses ? svgCheck() : svgCross()}</div>
         <div>
           <div class="req-title">Al menos 2 de 3 meses en positivo</div>
-          <div class="req-detail">${res.mesesPositivos} de ${res.mesesOrdenados.length} meses positivos</div>
+          <div class="req-detail">${res.mesesPositivos} de 3 meses positivos</div>
         </div>
       </div>
       <div class="req">
@@ -477,10 +597,14 @@ function renderResultados(res){
       </div>
     </div>
 
-    <p class="section-label anim" style="animation-delay:0.25s">Resultado mensual</p>
+    <p class="section-label anim" style="animation-delay:0.25s">Resultado mensual <span class="muted" style="font-weight:400;">— tocá un mes para ver el detalle</span></p>
     <div class="card anim" style="animation-delay:0.28s">
+      <div style="display:flex; padding:10px 0 4px; border-bottom:1px solid var(--border-strong); font-size:12px; color:var(--text-3);">
+        <span style="flex:1;">Mes</span>
+        <span style="width:110px; text-align:right;">Resultado</span>
+        <span style="width:110px; text-align:right;">Estado</span>
+      </div>
       <table>
-        <tr><th>Mes</th><th class="num">Resultado</th><th class="num">Estado</th></tr>
         ${filas}
       </table>
     </div>
@@ -493,7 +617,7 @@ function renderResultados(res){
       </table>
     </div>
 
-    <p class="foot-note anim" style="animation-delay:0.45s">Cálculo agrupado por mes calendario sobre la sección "Deals" del reporte. El retorno usa el profit total de trading del ciclo, sin descontar retiros ya realizados.</p>
+    <p class="foot-note anim" style="animation-delay:0.45s">Cálculo agrupado por mes calendario sobre la sección "Deals" del reporte. El retorno usa el profit total de trading del ciclo, sin descontar retiros ya realizados. Un mes sin operaciones cerradas no cuenta como positivo.</p>
   `;
   resultsEl.style.display = 'block';
 }
