@@ -429,7 +429,7 @@ function evaluarEscalado(rows){
   }
   const headers = rows[idxDeals + 1].map(h => (h || '').toString().trim());
   const col = (name) => headers.indexOf(name);
-  const cTime = col('Time'), cType = col('Type'), cComment = col('Comment'), cProfit = col('Profit'), cBalance = col('Balance'), cSymbol = col('Symbol'), cDirection = col('Direction');
+  const cTime = col('Time'), cType = col('Type'), cComment = col('Comment'), cProfit = col('Profit'), cBalance = col('Balance'), cSymbol = col('Symbol'), cDirection = col('Direction'), cCommission = col('Commission'), cSwap = col('Swap'), cFee = col('Fee');
 
   const deals = [];
   let finDeals = idxDeals + 2;
@@ -438,13 +438,17 @@ function evaluarEscalado(rows){
     if (!row) { finDeals = i; break; }
     const fecha = parseFecha(row[cTime]);
     if (!fecha) { finDeals = i; break; }
+    const profitBruto = Number(row[cProfit]) || 0;
+    const comision = Number(row[cCommission]) || 0;
+    const swap = Number(row[cSwap]) || 0;
+    const fee = Number(row[cFee]) || 0;
     deals.push({
       time: fecha,
       type: (row[cType] || '').toString().toLowerCase(),
       direction: (row[cDirection] || '').toString().toLowerCase(),
       symbol: (row[cSymbol] || '').toString(),
       comment: (row[cComment] || '').toString().toLowerCase(),
-      profit: Math.round((Number(row[cProfit]) || 0) * 100) / 100,
+      profit: Math.round((profitBruto + comision + swap + fee) * 100) / 100,
       balance: Number(row[cBalance])
     });
     finDeals = i + 1;
